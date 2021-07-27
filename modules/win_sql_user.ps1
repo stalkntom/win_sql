@@ -107,6 +107,70 @@ Function Get-DatabaseUser {
 
 }
 
+Function Get-TargetDatabaseUser {
+    [CmdletBinding()]
+    param (
+        [String]
+        $User,
+        [String]
+        $Database,
+        $CurrentUser,
+        [string[]]
+        $DatabaseRoles,
+        [string]
+        $DefaultSchema
+    )
+
+    $database_roles = @{
+        db_accessadmin = 0
+        db_backupoperator = 0
+        db_datareader = 0
+        db_datawriter = 0
+        db_ddladmin = 0
+        db_denydatareader = 0
+        db_denydatawriter = 0
+        db_owner = 0
+        db_securityadmin = 0
+    }
+
+    if($CurrentUser -and ($state -eq 'present')) {
+        if($CurrentUser.database_roles.db_accessadmin) {$database_roles.db_accessadmin = 1}
+        if($CurrentUser.database_roles.db_backupoperator) {$database_roles.db_backupoperator = 1}
+        if($CurrentUser.database_roles.db_datareader) {$database_roles.db_datareader = 1}
+        if($CurrentUser.database_roles.db_datawriter) {$database_roles.db_datawriter = 1}
+        if($CurrentUser.database_roles.db_ddladmin) {$database_roles.db_ddladmin = 1}
+        if($CurrentUser.database_roles.db_denydatareader) {$database_roles.db_denydatareader = 1}
+        if($CurrentUser.database_roles.db_denydatawriter) {$database_roles.db_denydatawriter = 1}
+        if($CurrentUser.database_roles.db_owner) {$database_roles.db_owner = 1}
+        if($CurrentUser.database_roles.db_securityadmin) {$database_roles.db_securityadmin = 1}
+    }
+
+    $user_target = @{
+        user = $User
+        user_exists = $false
+        database = $Database
+        default_schema = $null
+        database_roles = @{}
+    }
+
+    if (($state -eq 'present') -or ($state -eq 'pure')) {
+        $user_target.user_exists = $true
+
+        if($DefaultSchema) {
+            $user_target.default_schema = $DefaultSchema
+        }
+
+        foreach ($role in $DatabaseRoles) {
+            $database_roles.$role = 1
+        }
+    }
+
+    $user_target.database_roles = $database_roles
+
+    return $user_target
+
+}
+
 Function Set-DatabaseUser {
     [CmdletBinding()]
     param (
@@ -137,17 +201,19 @@ Function Set-DatabaseRoles {
 
 Try {
 
-    $user_status = Get-DatabaseUser -User $user -Database $database
+    $current_user = Get-DatabaseUser -User $user -Database $database
+    
+    $target_user = Get-TargetDatabaseUser -User $user -Database $database -CurrentUser $current_user -DefaultSchema $default_schema -DatabaseRoles $database_roles
+    
+    $Module.Diff.before = $current_user
+    $Module.Diff.after = $target_user
 
-    $Module.Diff.before = $user_status
+    $current_user | Set-DatabaseUser -User $user -DefaultSchema $default_schema
+    $current_user | Set-DatabaseRoles -DatabaseRoles $database_roles
 
-    $user_status | Set-DatabaseUser
+    $current_user = Get-DatabaseUser -User $user -Database $database
 
-    $user_status | Set-DatabaseRoles
-
-    $new_user_status = Get-User -User $user -Database $database
-
-    $Module.Diff.after = $new_user_status
+    $Module.Result.user = $current_user
 
     $module.ExitJson()
 }
